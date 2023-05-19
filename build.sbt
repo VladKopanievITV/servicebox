@@ -10,14 +10,37 @@ val readmePath = file(".") / readme
 val copyReadme =
   taskKey[File](s"Copy readme file to project root")
 
-val Scala213               = "2.13.3"
+val Scala213               = "2.13.10"
+
+val artifactoryCredentials = sys.env.get("CI") match {
+  case Some(value) if value.toBoolean =>
+    println("Credentials from envs.")
+    Credentials(
+      "Artifactory Realm",
+      "itvrepos.jfrog.io",
+      sys.env("ARTIFACTORY_USERNAME"),
+      sys.env("ARTIFACTORY_PASSWORD")
+    )
+  case _ =>
+    println("Local credentials.")
+    val cred = Credentials(Path.userHome / ".ivy2" / ".credentials")
+    println(cred)
+    cred
+}
+
+val resolverSettings = Seq(
+  credentials += artifactoryCredentials,
+  resolvers ++= Seq(
+    "AM Artifactory Realm" at "https://itvrepos.jfrog.io/itvrepos/am-scala-libs/"
+  )
+)
+
 
 val baseSettings = Seq(
   organization := "com.itv",
   name := "servicebox",
   scalaVersion := Scala213,
   scalacOptions ++= Seq(
-    "-target:jvm-1.8",
     "-encoding",
     "UTF-8",
     "-deprecation",
@@ -38,45 +61,9 @@ val baseSettings = Seq(
   )
 )
 
-val artefactSettings = baseSettings ++ Seq(
-  releaseProcess := Seq[ReleaseStep](
-    checkSnapshotDependencies,
-    inquireVersions,
-    runClean,
-    setReleaseVersion,
-    commitReleaseVersion,
-    tagRelease,
-    setNextVersion,
-    commitNextVersion,
-    pushChanges
-  ),
-  releaseCrossBuild := true,
-  publishMavenStyle := true,
-  publishArtifact in Test := false,
-  pomIncludeRepository := { _ =>
-    false
-  },
-  releasePublishArtifactsAction := PgpKeys.publishSigned.value,
-  pgpPublicRing := file("./ci/public.asc"),
-  pgpSecretRing := file("./ci/private.asc"),
-  pgpSigningKey := Some(-5373332187933973712L),
-  pgpPassphrase := Option(System.getenv("GPG_KEY_PASSPHRASE")).map(_.toArray),
-  homepage := Some(url("https://github.com/itv/servicebox")),
-  scmInfo := Some(ScmInfo(url("https://github.com/itv/servicebox"), "git@github.com:itv/servicebox.git")),
-  developers := List(Developer("afiore", "Andrea Fiore", "andrea.fiore@itv.com", url("https://github.com/afiore"))),
-  licenses += ("ITV Open Source Software Licence", url("http://itv.com/itv-oss-licence-v1.0")),
-  publishMavenStyle := true,
-  credentials ++= (for {
-    username <- Option(System.getenv().get("SONATYPE_USER"))
-    password <- Option(System.getenv().get("SONATYPE_PASS"))
-  } yield Credentials("Sonatype Nexus Repository Manager", "oss.sonatype.org", username, password)).toSeq,
-  publishTo := {
-    val nexus = "https://oss.sonatype.org/"
-    if (isSnapshot.value)
-      Some("snapshots" at nexus + "content/repositories/snapshots")
-    else
-      Some("releases" at nexus + "service/local/staging/deploy/maven2")
-  }
+val artefactSettings = baseSettings ++ resolverSettings ++ Seq(
+  publishArtifact := true,
+  publishTo := Some("Artifactory Realm" at "https://itvrepos.jfrog.io/itvrepos/am-scala-libs/")
 )
 
 def withDeps(p: Project)(dep: Project*): Project = p.dependsOn(dep.map(_ % "compile->compile;test->test"): _*)
@@ -132,3 +119,7 @@ lazy val example = withDeps(
 lazy val root = (project in file("."))
   .aggregate(core, docker)
   .settings(artefactSettings)
+
+
+ThisBuild / gitVersioningSnapshotLowerBound := "0.5.0"
+ThisBuild / versionScheme := Some("early-semver")
